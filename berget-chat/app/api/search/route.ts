@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        api_key: process.env.TAVILY_API_KEY || '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',
+        api_key: process.env.TAVILY_API_KEY,
         query: query,
         search_depth: 'basic',
         include_answer: true,

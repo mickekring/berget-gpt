@@ -3,7 +3,7 @@ import OpenAI from 'openai'
 import { functions, executeFunction } from '@/lib/functions'
 
 const openai = new OpenAI({
-  apiKey: process.env.BERGET_API_KEY || 'sk_ber_uVcKmCV2QqUGTrhWOatPK0fSpmLXpDQAdrH_7d678ca6646d7b1b',
+  apiKey: process.env.BERGET_API_KEY,
   baseURL: 'https://api.berget.ai/v1'
 })
 

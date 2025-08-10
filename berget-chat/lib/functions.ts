@@ -39,7 +39,7 @@ export async function searchInternet(query: string): Promise<string> {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        api_key: process.env.TAVILY_API_KEY || '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',
+        api_key: process.env.TAVILY_API_KEY,
         query: query,
         search_depth: 'basic',
         include_answer: true,
@@ -90,7 +90,7 @@ export async function searchDocuments(query: string, documentChunks: any[]): Pro
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY || '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'}`
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
       },
       body: JSON.stringify({
         model: 'text-embedding-3-small',

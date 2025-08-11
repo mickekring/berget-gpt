@@ -1,6 +1,6 @@
 import { Message } from './types'
 
-export async function* streamMessage(messages: Message[], model: string, systemPrompt?: string, onFunctionCall?: (name: string, args: any) => void, documentChunks?: any[]) {
+export async function* streamMessage(messages: Message[], model: string, systemPrompt?: string, onFunctionCall?: (name: string, args: any) => void, documentChunks?: any[], mcpEnabled: boolean = true) {
   try {
     const formattedMessages = messages.map(msg => ({
       role: msg.role as 'user' | 'assistant' | 'system',
@@ -20,7 +20,8 @@ export async function* streamMessage(messages: Message[], model: string, systemP
       body: JSON.stringify({
         messages: messagesWithSystem,
         model: model,
-        documentChunks: documentChunks || []
+        documentChunks: documentChunks || [],
+        mcpEnabled: mcpEnabled
       })
     })
 

@@ -1,7 +1,7 @@
 'use client'
 
 import { Message } from '@/lib/types'
-import { User, Bot, Search, FileText } from 'lucide-react'
+import { User, Bot, Search, FileText, Zap, Globe, Mail, MessageSquare, BookOpen, Loader2 } from 'lucide-react'
 import { clsx } from 'clsx'
 import MarkdownMessage from '@/components/MarkdownMessage'
 import { useTranslation } from 'react-i18next'
@@ -22,83 +22,139 @@ export default function MessageList({ messages, isLoading, currentFunctionCall }
     return isLoading && isLastMessage && isAssistantMessage
   }
 
+  // Helper function to get tool icon and info
+  const getToolInfo = (toolName: string) => {
+    if (toolName === 'search_documents') {
+      return {
+        icon: FileText,
+        label: t('chat.searchingDocuments'),
+        color: 'orange'
+      }
+    } else if (toolName === 'wikipedia-api' || toolName === 'mcp_wikipedia-api') {
+      return {
+        icon: BookOpen,
+        label: 'Searching Wikipedia',
+        color: 'blue'
+      }
+    } else if (toolName === 'Discord' || toolName === 'mcp_Discord') {
+      return {
+        icon: MessageSquare,
+        label: 'Sending Discord message',
+        color: 'indigo'
+      }
+    } else if (toolName === 'Send_Email' || toolName === 'mcp_Send_Email') {
+      return {
+        icon: Mail,
+        label: 'Sending email',
+        color: 'green'
+      }
+    } else if (toolName === 'eduassist' || toolName === 'mcp_eduassist') {
+      return {
+        icon: BookOpen,
+        label: 'Searching educational resources',
+        color: 'purple'
+      }
+    } else if (toolName?.startsWith('mcp_')) {
+      return {
+        icon: Zap,
+        label: `Using ${toolName.substring(4)}`,
+        color: 'purple'
+      }
+    } else {
+      return {
+        icon: Globe,
+        label: t('chat.searchingInternet'),
+        color: 'green'
+      }
+    }
+  }
+
   return (
     <div className="flex-1 p-4">
       <div className="max-w-4xl mx-auto space-y-6">
-        {messages.map((message, index) => (
-          <div
-            key={message.id}
-            className={clsx(
-              'flex gap-4',
-              message.role === 'user' ? 'justify-end' : 'justify-start'
-            )}
-          >
-            {message.role === 'assistant' && (
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center flex-shrink-0">
-                <Bot size={18} className="text-white" />
-              </div>
-            )}
-            
+        {messages.map((message, index) => {
+          const isLastAssistant = index === messages.length - 1 && message.role === 'assistant'
+          const isUsingTool = isLastAssistant && currentFunctionCall
+          const hasUsedTools = message.toolCalls && message.toolCalls.length > 0
+          
+          return (
             <div
+              key={message.id}
               className={clsx(
-                'max-w-[70%] rounded-2xl px-4 py-3',
-                message.role === 'user'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+                'flex gap-4',
+                message.role === 'user' ? 'justify-end' : 'justify-start'
               )}
             >
-              {message.role === 'assistant' ? (
-                <MarkdownMessage 
-                  content={message.content}
-                  isStreaming={isMessageStreaming(index, message)}
-                />
-              ) : (
-                <div className="whitespace-pre-wrap break-words">
-                  {message.content}
+              {message.role === 'assistant' && (
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center flex-shrink-0">
+                  <Bot size={18} className="text-white" />
+                </div>
+              )}
+              
+              <div
+                className={clsx(
+                  'max-w-[70%] rounded-2xl overflow-hidden',
+                  message.role === 'user'
+                    ? 'bg-blue-600 text-white'
+                    : isUsingTool || hasUsedTools
+                    ? 'bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 border border-emerald-200 dark:border-emerald-800'
+                    : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+                )}
+              >
+                {/* Tool usage indicator at the top of assistant message */}
+                {message.role === 'assistant' && (isUsingTool || hasUsedTools) && (
+                  <div className="px-4 py-2 bg-gradient-to-r from-emerald-100 to-teal-100 dark:from-emerald-900/30 dark:to-teal-900/30 border-b border-emerald-200 dark:border-emerald-800">
+                    {isUsingTool && currentFunctionCall ? (
+                      <div className="flex items-center gap-2">
+                        {(() => {
+                          const toolInfo = getToolInfo(currentFunctionCall.name)
+                          const Icon = toolInfo.icon
+                          return (
+                            <>
+                              <Icon size={16} className="text-emerald-600 dark:text-emerald-400 animate-pulse" />
+                              <span className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
+                                {toolInfo.label}
+                              </span>
+                              <Loader2 size={14} className="text-emerald-600 dark:text-emerald-400 animate-spin ml-auto" />
+                            </>
+                          )
+                        })()}
+                      </div>
+                    ) : hasUsedTools ? (
+                      <div className="flex items-center gap-2">
+                        <Zap size={16} className="text-emerald-600 dark:text-emerald-400" />
+                        <span className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
+                          Used {message.toolCalls?.length} tool{message.toolCalls?.length > 1 ? 's' : ''}
+                        </span>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+                
+                <div className={message.role === 'assistant' && (isUsingTool || hasUsedTools) ? 'px-4 py-3' : 'px-4 py-3'}>
+                  {message.role === 'assistant' ? (
+                    <MarkdownMessage 
+                      content={message.content}
+                      isStreaming={isMessageStreaming(index, message)}
+                    />
+                  ) : (
+                    <div className="whitespace-pre-wrap break-words">
+                      {message.content}
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              {message.role === 'user' && (
+                <div className="w-8 h-8 rounded-full bg-gray-600 flex items-center justify-center flex-shrink-0">
+                  <User size={18} className="text-white" />
                 </div>
               )}
             </div>
-            
-            {message.role === 'user' && (
-              <div className="w-8 h-8 rounded-full bg-gray-600 flex items-center justify-center flex-shrink-0">
-                <User size={18} className="text-white" />
-              </div>
-            )}
-          </div>
-        ))}
+          )
+        })}
         
-        {currentFunctionCall && (
-          <div className="flex gap-4 justify-start">
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-              currentFunctionCall.name === 'search_documents' 
-                ? 'bg-gradient-to-br from-orange-500 to-red-600'
-                : 'bg-gradient-to-br from-green-500 to-blue-600'
-            }`}>
-              {currentFunctionCall.name === 'search_documents' ? (
-                <FileText size={18} className="text-white animate-pulse" />
-              ) : (
-                <Search size={18} className="text-white animate-pulse" />
-              )}
-            </div>
-            <div className={`rounded-2xl px-4 py-3 border ${
-              currentFunctionCall.name === 'search_documents'
-                ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800'
-                : 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'
-            }`}>
-              <div className={`text-sm ${
-                currentFunctionCall.name === 'search_documents'
-                  ? 'text-orange-700 dark:text-orange-300'
-                  : 'text-green-700 dark:text-green-300'
-              }`}>
-{currentFunctionCall.name === 'search_documents' 
-                  ? t('chat.searchingDocuments')
-                  : t('chat.searchingInternet')
-                }
-              </div>
-            </div>
-          </div>
-        )}
-        
+        {/* Show typing indicator only when loading and no assistant message exists yet */}
         {isLoading && messages[messages.length - 1]?.role !== 'assistant' && !currentFunctionCall && (
           <div className="flex gap-4 justify-start">
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center flex-shrink-0">

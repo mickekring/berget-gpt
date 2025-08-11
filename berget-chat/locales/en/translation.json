@@ -51,7 +51,9 @@
     "close": "Close",
     "invalidCredentials": "Invalid username or password",
     "profileUpdateFailed": "Failed to update profile. Please try again.",
-    "profileUpdateError": "An error occurred while updating profile."
+    "profileUpdateError": "An error occurred while updating profile.",
+    "loginRequired": "Login Required",
+    "loginRequiredDescription": "You must sign in to use the chat service and access all features."
   },
   "prompts": {
     "selectPrompt": "Select Prompt",

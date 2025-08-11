@@ -35,14 +35,44 @@ export default function ChatInterface({ messages, setMessages, onNewChat, isSide
   const { t } = useTranslation()
   
   const models: Model[] = [
-    { id: 'openai/gpt-oss-120b', name: 'GPT-OSS 120B', description: t('chat.models.gptOss') },
-    { id: 'meta-llama/Llama-3.3-70B-Instruct', name: 'Llama 3.3 70B', description: t('chat.models.llama') },
-    { id: 'mistralai/Mistral-Small-3.1-24B-Instruct-2503', name: 'Mistral Small 3.1 24B', description: t('chat.models.mistralSmall') },
-    { id: 'mistralai/Devstral-Small-2505', name: 'Devstral Small', description: t('chat.models.devstral') }
+    { 
+      id: 'openai/gpt-oss-120b', 
+      name: 'GPT-OSS 120B', 
+      description: t('chat.models.gptOss'),
+      capabilities: ['Chat']
+    },
+    { 
+      id: 'meta-llama/Llama-3.3-70B-Instruct', 
+      name: 'Llama 3.3 70B', 
+      description: t('chat.models.llama'),
+      capabilities: ['Chat', 'Internetsök', 'Filuppladdning']
+    },
+    { 
+      id: 'mistralai/Mistral-Small-3.1-24B-Instruct-2503', 
+      name: 'Mistral Small 3.1 24B', 
+      description: t('chat.models.mistralSmall'),
+      capabilities: ['Chat']
+    },
+    { 
+      id: 'mistralai/Devstral-Small-2505', 
+      name: 'Devstral Small', 
+      description: t('chat.models.devstral'),
+      capabilities: ['Chat']
+    }
   ]
 
   const [input, setInput] = useState('')
   const [selectedModel, setSelectedModel] = useState<Model>(models[1])
+  const [mcpCheckInProgress, setMcpCheckInProgress] = useState(false)
+  const [mcpDiscoveredTools, setMcpDiscoveredTools] = useState<string[]>([])
+  const [mcpEnabled, setMcpEnabled] = useState(() => {
+    // Load MCP preference from localStorage, default to true
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('mcpEnabled')
+      return saved !== null ? saved === 'true' : true
+    }
+    return true
+  })
   const [selectedPrompt, setSelectedPrompt] = useState<Prompt | null>(null)
   const [sessionPrompts, setSessionPrompts] = useState<Prompt[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -55,6 +85,7 @@ export default function ChatInterface({ messages, setMessages, onNewChat, isSide
   const [documentChunks, setDocumentChunks] = useState<DocumentChunk[]>([])
   const [isProcessingFiles, setIsProcessingFiles] = useState(false)
   const [showFileUpload, setShowFileUpload] = useState(false)
+  const [mcpToolsAvailable, setMcpToolsAvailable] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { isLoggedIn, username, firstName, lastName, systemPrompt, logout } = useAuth()
@@ -74,7 +105,29 @@ export default function ChatInterface({ messages, setMessages, onNewChat, isSide
       const token = localStorage.getItem('authToken')
       if (!token) return null
 
-      const title = generateConversationTitle(firstMessage)
+      // Generate title using Llama 3.3
+      let title = 'New Chat'
+      try {
+        const titleResponse = await fetch('/api/generate-title', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            messages: [{ role: 'user', content: firstMessage }]
+          })
+        })
+        
+        if (titleResponse.ok) {
+          const data = await titleResponse.json()
+          title = data.title
+        }
+      } catch (error) {
+        console.error('Failed to generate title:', error)
+        // Fallback to simple title generation
+        title = generateConversationTitle(firstMessage)
+      }
+
       const response = await fetch('/api/conversations', {
         method: 'POST',
         headers: {
@@ -131,7 +184,7 @@ export default function ChatInterface({ messages, setMessages, onNewChat, isSide
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim() || isLoading) return
+    if (!input.trim() || isLoading || !isLoggedIn) return
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -175,7 +228,7 @@ export default function ChatInterface({ messages, setMessages, onNewChat, isSide
       const promptToUse = selectedPrompt?.content || systemPrompt || undefined
       const stream = streamMessage(updatedMessages, selectedModel.id, promptToUse, (name, args) => {
         setCurrentFunctionCall({ name, args })
-      }, documentChunks)
+      }, documentChunks, mcpEnabled)
       
       for await (const chunk of stream) {
         fullContent += chunk
@@ -186,6 +239,45 @@ export default function ChatInterface({ messages, setMessages, onNewChat, isSide
       // Save assistant message to database
       if (isLoggedIn && conversationToUse && fullContent) {
         await saveMessage(conversationToUse.Id || conversationToUse.id!, 'assistant', fullContent)
+        
+        // Update title if this is the first exchange (2 messages: user + assistant)
+        if (messages.length === 0 && conversationToUse.title === 'New Chat') {
+          try {
+            const titleResponse = await fetch('/api/generate-title', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                messages: [
+                  { role: 'user', content: userMessage.content },
+                  { role: 'assistant', content: fullContent.slice(0, 500) }
+                ]
+              })
+            })
+            
+            if (titleResponse.ok) {
+              const data = await titleResponse.json()
+              // Update conversation title in database
+              const token = localStorage.getItem('authToken')
+              if (token) {
+                await fetch(`/api/conversations/${conversationToUse.Id || conversationToUse.id}`, {
+                  method: 'PATCH',
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({ title: data.title })
+                })
+                // Update local conversation object
+                conversationToUse.title = data.title
+                onConversationChange({ ...conversationToUse })
+              }
+            }
+          } catch (error) {
+            console.error('Failed to update title:', error)
+          }
+        }
       }
       
       setCurrentFunctionCall(null)
@@ -216,6 +308,8 @@ export default function ChatInterface({ messages, setMessages, onNewChat, isSide
   }
 
   const handleVoiceClick = async () => {
+    if (!isLoggedIn) return
+    
     if (isRecording) {
       // Stop recording and transcribe
       try {
@@ -265,7 +359,7 @@ export default function ChatInterface({ messages, setMessages, onNewChat, isSide
             const promptToUse = selectedPrompt?.content || systemPrompt || undefined
             const stream = streamMessage(updatedMessages, selectedModel.id, promptToUse, (name, args) => {
               setCurrentFunctionCall({ name, args })
-            }, documentChunks)
+            }, documentChunks, mcpEnabled)
             
             for await (const chunk of stream) {
               fullContent += chunk
@@ -327,6 +421,66 @@ export default function ChatInterface({ messages, setMessages, onNewChat, isSide
       setShowFileUpload(false)
     }
   }, [])
+
+  // Check MCP tool availability when component mounts or model changes
+  useEffect(() => {
+    const checkMCPTools = async () => {
+      // Only check MCP for Llama model and if MCP is enabled
+      if (!selectedModel.id.includes('Llama') || !mcpEnabled) {
+        console.log('MCP not available for model:', selectedModel.id, 'or disabled')
+        setMcpToolsAvailable(false)
+        setMcpCheckInProgress(false)
+        setMcpDiscoveredTools([])
+        return
+      }
+
+      console.log('Checking MCP tools for Llama model...')
+      setMcpCheckInProgress(true)
+      let retries = 0
+      const maxRetries = 3
+      
+      while (retries < maxRetries) {
+        try {
+          const response = await fetch('/api/mcp?refresh=' + (retries > 0))
+          if (response.ok) {
+            const data = await response.json()
+            console.log(`MCP API response (attempt ${retries + 1}):`, data)
+            const hasTools = data.success && data.tools && data.tools.length > 0
+            
+            if (hasTools) {
+              console.log('MCP tools available:', data.tools.length, 'tools')
+              const toolNames = data.tools.map((tool: any) => tool.name)
+              setMcpDiscoveredTools(toolNames)
+              setMcpToolsAvailable(true)
+              setMcpCheckInProgress(false)
+              return
+            } else if (retries < maxRetries - 1) {
+              console.log('No tools yet, retrying in 1 second...')
+              await new Promise(resolve => setTimeout(resolve, 1000))
+            }
+          }
+        } catch (error) {
+          console.log(`MCP check failed (attempt ${retries + 1}):`, error)
+        }
+        retries++
+      }
+      
+      console.log('MCP tools not available after', maxRetries, 'attempts')
+      setMcpToolsAvailable(false)
+      setMcpCheckInProgress(false)
+      setMcpDiscoveredTools([])
+    }
+    
+    checkMCPTools()
+  }, [selectedModel, mcpEnabled])
+
+  // Toggle MCP enabled/disabled
+  const handleMcpToggle = () => {
+    const newEnabled = !mcpEnabled
+    setMcpEnabled(newEnabled)
+    // Save preference to localStorage
+    localStorage.setItem('mcpEnabled', newEnabled.toString())
+  }
 
   // Process files when they change
   const handleFilesChange = async (files: UploadedFile[]) => {
@@ -415,11 +569,55 @@ export default function ChatInterface({ messages, setMessages, onNewChat, isSide
               <Plus size={20} className="text-gray-600 dark:text-gray-400" />
             </button>
           )}
-          <ModelSelector 
-            models={models}
-            selectedModel={selectedModel}
-            onSelectModel={setSelectedModel}
-          />
+          <div className="flex items-center gap-2">
+            <ModelSelector 
+              models={models}
+              selectedModel={selectedModel}
+              onSelectModel={setSelectedModel}
+            />
+            {selectedModel.id.includes('Llama') && (
+              <button
+                onClick={handleMcpToggle}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all hover:scale-105 ${
+                  !mcpEnabled
+                    ? 'bg-gray-100 dark:bg-gray-900/30 border-gray-200 dark:border-gray-800'
+                    : mcpToolsAvailable 
+                    ? 'bg-purple-100 dark:bg-purple-900/30 border-purple-200 dark:border-purple-800 hover:bg-purple-200 dark:hover:bg-purple-900/50'
+                    : mcpCheckInProgress
+                    ? 'bg-yellow-100 dark:bg-yellow-900/30 border-yellow-200 dark:border-yellow-800'
+                    : 'bg-red-100 dark:bg-red-900/30 border-red-200 dark:border-red-800'
+                }`}
+                title={
+                  !mcpEnabled
+                    ? "MCP disabled - Click to enable"
+                    : mcpCheckInProgress
+                    ? "Connecting to MCP server..."
+                    : mcpToolsAvailable && mcpDiscoveredTools.length > 0
+                    ? `MCP tools available: ${mcpDiscoveredTools.join(', ')}`
+                    : "MCP connection failed - Click to retry"
+                }
+              >
+                <span className={`w-2 h-2 rounded-full ${
+                  !mcpEnabled
+                    ? 'bg-gray-500'
+                    : mcpToolsAvailable 
+                    ? 'bg-purple-500' 
+                    : mcpCheckInProgress
+                    ? 'bg-yellow-500 animate-pulse'
+                    : 'bg-red-500'
+                }`}></span>
+                <span className={`text-sm font-medium ${
+                  !mcpEnabled
+                    ? 'text-gray-700 dark:text-gray-300'
+                    : mcpToolsAvailable 
+                    ? 'text-purple-700 dark:text-purple-300' 
+                    : mcpCheckInProgress
+                    ? 'text-yellow-700 dark:text-yellow-300'
+                    : 'text-red-700 dark:text-red-300'
+                }`}>MCP</span>
+              </button>
+            )}
+          </div>
           <PromptSelector
             selectedPrompt={selectedPrompt}
             onSelectPrompt={setSelectedPrompt}
@@ -506,75 +704,102 @@ export default function ChatInterface({ messages, setMessages, onNewChat, isSide
       </div>
 
       <div className="p-4 flex-shrink-0">
-        {showFileUpload && (
-          <div className="max-w-4xl mx-auto mb-4">
-            <FileUpload 
-              files={uploadedFiles}
-              onFilesChange={handleFilesChange}
-              isProcessing={isProcessingFiles}
-              documentsReady={documentChunks.length > 0}
-            />
+        {isLoggedIn ? (
+          <>
+            {showFileUpload && (
+              <div className="max-w-4xl mx-auto mb-4">
+                <FileUpload 
+                  files={uploadedFiles}
+                  onFilesChange={handleFilesChange}
+                  isProcessing={isProcessingFiles}
+                  documentsReady={documentChunks.length > 0}
+                />
+              </div>
+            )}
+            <form onSubmit={handleSubmit} className="max-w-4xl mx-auto">
+              <div className="relative flex items-end gap-2 bg-gray-100 dark:bg-gray-900 rounded-2xl p-2 mb-0.5">
+                <button
+                  type="button"
+                  onClick={() => setShowFileUpload(!showFileUpload)}
+                  className={`p-2 rounded-lg transition-colors ${
+                    uploadedFiles.length > 0 
+                      ? 'bg-blue-100 hover:bg-blue-200 dark:bg-blue-900 dark:hover:bg-blue-800' 
+                      : 'hover:bg-gray-200 dark:hover:bg-gray-800'
+                  }`}
+                  title={uploadedFiles.length > 0 ? t('chat.filesUploaded', { count: uploadedFiles.length }) : t('chat.uploadFiles')}
+                >
+                  <Paperclip size={20} className={`${uploadedFiles.length > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-400'}`} />
+                </button>
+                
+                <textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={t('chat.placeholder')}
+                  className="flex-1 bg-transparent resize-none outline-none py-2 px-2 max-h-[200px] text-gray-900 dark:text-gray-100 placeholder-gray-500"
+                  rows={1}
+                />
+                
+                <button
+                  type="button"
+                  onClick={handleVoiceClick}
+                  disabled={isTranscribing}
+                  className={`p-2 rounded-lg transition-colors ${
+                    isRecording 
+                      ? 'bg-red-600 hover:bg-red-700 text-white animate-pulse' 
+                      : isTranscribing
+                      ? 'bg-gray-400 cursor-not-allowed'
+                      : 'hover:bg-gray-200 dark:hover:bg-gray-800'
+                  }`}
+                  title={isRecording ? t('chat.stopRecording') : isTranscribing ? t('chat.transcribing') : t('chat.startVoiceRecording')}
+                >
+                  <Mic size={20} className={`${
+                    isRecording 
+                      ? 'text-white' 
+                      : isTranscribing 
+                      ? 'text-gray-300' 
+                      : 'text-gray-600 dark:text-gray-400'
+                  }`} />
+                </button>
+                
+                <button
+                  type="submit"
+                  disabled={!input.trim() || isLoading}
+                  className="p-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                >
+                  <Send size={20} className="" />
+                </button>
+              </div>
+              <div className="text-center text-xs text-gray-500 mt-2">
+{t('chat.poweredBy')}
+              </div>
+            </form>
+          </>
+        ) : (
+          <div className="max-w-4xl mx-auto">
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-800 rounded-2xl p-6 text-center">
+              <div className="mb-4">
+                <div className="w-16 h-16 mx-auto mb-4 bg-blue-100 dark:bg-blue-900/50 rounded-full flex items-center justify-center">
+                  <LogIn size={32} className="text-blue-600 dark:text-blue-400" />
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
+                  {t('auth.loginRequired')}
+                </h3>
+                <p className="text-gray-600 dark:text-gray-400 mb-6">
+                  {t('auth.loginRequiredDescription')}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowLoginModal(true)}
+                className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
+              >
+                <LogIn size={20} />
+                {t('auth.signIn')}
+              </button>
+            </div>
           </div>
         )}
-        <form onSubmit={handleSubmit} className="max-w-4xl mx-auto">
-          <div className="relative flex items-end gap-2 bg-gray-100 dark:bg-gray-900 rounded-2xl p-2">
-            <button
-              type="button"
-              onClick={() => setShowFileUpload(!showFileUpload)}
-              className={`p-2 rounded-lg transition-colors ${
-                uploadedFiles.length > 0 
-                  ? 'bg-blue-100 hover:bg-blue-200 dark:bg-blue-900 dark:hover:bg-blue-800' 
-                  : 'hover:bg-gray-200 dark:hover:bg-gray-800'
-              }`}
-              title={uploadedFiles.length > 0 ? t('chat.filesUploaded', { count: uploadedFiles.length }) : t('chat.uploadFiles')}
-            >
-              <Paperclip size={20} className={uploadedFiles.length > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-400'} />
-            </button>
-            
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={t('chat.placeholder')}
-              className="flex-1 bg-transparent resize-none outline-none py-2 px-2 max-h-[200px] text-gray-900 dark:text-gray-100 placeholder-gray-500"
-              rows={1}
-            />
-            
-            <button
-              type="button"
-              onClick={handleVoiceClick}
-              disabled={isTranscribing}
-              className={`p-2 rounded-lg transition-colors ${
-                isRecording 
-                  ? 'bg-red-600 hover:bg-red-700 text-white animate-pulse' 
-                  : isTranscribing
-                  ? 'bg-gray-400 cursor-not-allowed'
-                  : 'hover:bg-gray-200 dark:hover:bg-gray-800'
-              }`}
-              title={isRecording ? t('chat.stopRecording') : isTranscribing ? t('chat.transcribing') : t('chat.startVoiceRecording')}
-            >
-              <Mic size={20} className={
-                isRecording 
-                  ? 'text-white' 
-                  : isTranscribing 
-                  ? 'text-gray-300' 
-                  : 'text-gray-600 dark:text-gray-400'
-              } />
-            </button>
-            
-            <button
-              type="submit"
-              disabled={!input.trim() || isLoading}
-              className="p-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
-            >
-              <Send size={20} />
-            </button>
-          </div>
-          <div className="text-center text-xs text-gray-500 mt-2">
-{t('chat.poweredBy')}
-          </div>
-        </form>
       </div>
       
       <LoginModal 

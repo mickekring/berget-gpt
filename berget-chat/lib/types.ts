@@ -4,6 +4,11 @@ export interface Message {
   role: 'user' | 'assistant' | 'system'
   content: string
   timestamp: Date
+  toolCalls?: {
+    name: string
+    args: any
+    status: 'calling' | 'completed'
+  }[]
 }
 
 // Legacy conversation interface (keeping for compatibility)
@@ -18,6 +23,7 @@ export interface Model {
   id: string
   name: string
   description?: string
+  capabilities?: string[]
 }
 
 export interface UploadedFile {

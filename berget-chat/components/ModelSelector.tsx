@@ -56,8 +56,20 @@ export default function ModelSelector({ models, selectedModel, onSelectModel }: 
                       {model.name}
                     </div>
                     {model.description && (
-                      <div className="text-sm text-gray-500 dark:text-gray-400">
+                      <div className="text-sm text-gray-500 dark:text-gray-400 mb-2">
                         {model.description}
+                      </div>
+                    )}
+                    {model.capabilities && model.capabilities.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {model.capabilities.map((capability) => (
+                          <span
+                            key={capability}
+                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-600"
+                          >
+                            {capability}
+                          </span>
+                        ))}
                       </div>
                     )}
                   </div>
